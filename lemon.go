@@ -2,15 +2,19 @@ package lemon
 
 import (
 	"errors"
+	// "fmt"
 	"github.com/gorilla/websocket"
 )
 
 var (
 	ErrConnectFailed    error = errors.New("Can't connect to lemon markets")
 	ErrConnectionClosed error = errors.New("Lemon markets connection closed")
+	ErrTypeUnknown      error = errors.New("Type not known")
 )
 
 const (
+	CONNECTIONTYPE_PRICE                   string = "price"
+	CONNECTIONTYPE_QUOTE                   string = "quote"
 	ACTION_SUBSCRIBE                       string = "subscribe"
 	ACTION_UNSUBSCRIBE                     string = "subscribe"
 	SPECIFIER_WITH_QUANTITY                string = "with-quantity"
@@ -25,13 +29,13 @@ type lemonMarketSubscription struct {
 	ISIN      string `json:"value"`
 }
 
-type LemonMarketsPriceUpdate struct {
+type PriceUpdate struct {
 	ISIN     string  `json:"isin"`
 	Price    float64 `json:"price"`
 	Quantity float64 `json:"quantity"`
 }
 
-type LemonMarketsQuoteUpdate struct {
+type QuoteUpdate struct {
 	ISIN    string  `json:"isin"`
 	Bid     float64 `json:"bid_price"`
 	Ask     float64 `json:"ask_price"`
@@ -39,32 +43,41 @@ type LemonMarketsQuoteUpdate struct {
 	Asksize float64 `json:"ask_size"`
 }
 
-func (lmpr LemonMarketsPriceUpdate) WasTrade() bool {
+func (lmpr PriceUpdate) WasTrade() bool {
 	return lmpr.Quantity > 0
 }
 
+type OnPriceUpdateFunc func(PriceUpdate)
+type OnQuoteUpdateFunc func(QuoteUpdate)
+type OnErrorFunc func(error)
+
 type LemonMarketsStream struct {
-	marketdataConnection *websocket.Conn
-	quotesConnection     *websocket.Conn
-	quitWorkers          bool
-	subscriptions        map[string]int
-	marketpricepipe      chan LemonMarketsPriceUpdate
-	quotepipe            chan LemonMarketsQuoteUpdate
-	errorpipe            chan error
+	connection     *websocket.Conn
+	connectiontype string
+	processData    bool
+	subscriptions  map[string]int
+	OnPriceUpdate  OnPriceUpdateFunc
+	OnQuoteUpdate  OnQuoteUpdateFunc
+	OnError        OnErrorFunc
 }
 
 func (lms *LemonMarketsStream) Subscribe(isin string) {
 	if _, exists := lms.subscriptions[isin]; !exists {
 		lms.subscriptions[isin] = 1
-		lms.marketdataConnection.WriteJSON(lemonMarketSubscription{
-			Action:    ACTION_SUBSCRIBE,
-			Specifier: SPECIFIER_WITH_QUANTITIY_AND_UNCOVERED,
-			ISIN:      isin})
 
-		lms.quotesConnection.WriteJSON(lemonMarketSubscription{
-			Action:    ACTION_SUBSCRIBE,
-			Specifier: SPECIFIER_WITH_QUANTITY_WITH_PRICE,
-			ISIN:      isin})
+		switch lms.connectiontype {
+		case CONNECTIONTYPE_PRICE:
+			lms.connection.WriteJSON(&lemonMarketSubscription{
+				Action:    ACTION_SUBSCRIBE,
+				Specifier: SPECIFIER_WITH_QUANTITIY_AND_UNCOVERED,
+				ISIN:      isin})
+
+		case CONNECTIONTYPE_QUOTE:
+			lms.connection.WriteJSON(&lemonMarketSubscription{
+				Action:    ACTION_SUBSCRIBE,
+				Specifier: SPECIFIER_WITH_QUANTITY_WITH_PRICE,
+				ISIN:      isin})
+		}
 	}
 }
 
@@ -72,128 +85,69 @@ func (lms *LemonMarketsStream) Unsubscribe(isin string) {
 	if _, exists := lms.subscriptions[isin]; exists {
 		delete(lms.subscriptions, isin)
 
-		lms.marketdataConnection.WriteJSON(lemonMarketSubscription{
-			Action: ACTION_UNSUBSCRIBE,
-			ISIN:   isin})
-
-		lms.quotesConnection.WriteJSON(lemonMarketSubscription{
+		lms.connection.WriteJSON(&lemonMarketSubscription{
 			Action: ACTION_UNSUBSCRIBE,
 			ISIN:   isin})
 	}
 }
 
-func (lms *LemonMarketsStream) tradeWorker() {
-
-	for lms.quitWorkers {
-		answer := LemonMarketsPriceUpdate{}
-		err := lms.marketdataConnection.ReadJSON(&answer)
-
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				lms.errorpipe <- ErrConnectFailed
-			} else {
-				lms.errorpipe <- err
-			}
-
-			lms.quitWorkers = true
-		} else if len(answer.ISIN) > 0 {
-			lms.marketpricepipe <- answer
-		}
-	}
-}
-
-func (lms *LemonMarketsStream) quotesWorker() {
-
-	for lms.quitWorkers {
-		answer := LemonMarketsQuoteUpdate{}
-		err := lms.quotesConnection.ReadJSON(&answer)
-
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				lms.errorpipe <- ErrConnectFailed
-			} else {
-				lms.errorpipe <- err
-			}
-
-			lms.quitWorkers = true
-		} else if len(answer.ISIN) > 0 {
-			lms.quotepipe <- answer
-		}
-	}
-}
-
-func (lms *LemonMarketsStream) MarketPricePipe() chan LemonMarketsPriceUpdate {
-	return lms.marketpricepipe
-}
-
-func (lms *LemonMarketsStream) QuotePipe() chan LemonMarketsQuoteUpdate {
-	return lms.quotepipe
-}
-
-func (lms *LemonMarketsStream) ErrorPipe() chan error {
-	return lms.errorpipe
-}
-
-func NewLemonMarketsStream() (*LemonMarketsStream, error) {
+func Connect(connectiontype string) (*LemonMarketsStream, error) {
 	lms := &LemonMarketsStream{}
+	lms.connectiontype = connectiontype
+	var url string
 
-	if err := lms.connect(); err != nil {
-		return nil, err
+	switch connectiontype {
+	case CONNECTIONTYPE_PRICE:
+		url = "wss://api.lemon.markets/streams/v1/marketdata"
+
+	case CONNECTIONTYPE_QUOTE:
+		url = "wss://api.lemon.markets/streams/v1/quotes"
+
+	default:
+		return nil, ErrTypeUnknown
+	}
+
+	connection, _, connectionError := websocket.DefaultDialer.Dial(url, nil)
+
+	if connectionError != nil {
+		return nil, ErrConnectFailed
 	} else {
+		lms.connection = connection
+		lms.processData = true
+		lms.subscriptions = make(map[string]int)
+
 		return lms, nil
 	}
 }
 
-func (lms *LemonMarketsStream) connect() error {
-	marketdataConnection, _, marketdataConnectionErr := websocket.DefaultDialer.Dial("wss://api.lemon.markets/streams/v1/marketdata", nil)
-	quotesConnection, _, quotesConnectionErr := websocket.DefaultDialer.Dial("wss://api.lemon.markets/streams/v1/quotes", nil)
+func (lms *LemonMarketsStream) handleError(err error) {
+	lms.processData = false
 
-	if marketdataConnectionErr != nil {
-		return ErrConnectFailed
-	} else if quotesConnectionErr != nil {
-		return ErrConnectFailed
-	} else {
-		lms.marketdataConnection = marketdataConnection
-		lms.quotesConnection = quotesConnection
-		lms.quitWorkers = false
-		lms.subscriptions = make(map[string]int)
-		lms.marketpricepipe = make(chan LemonMarketsPriceUpdate, 20)
-		lms.quotepipe = make(chan LemonMarketsQuoteUpdate, 20)
-		lms.errorpipe = make(chan error, 5)
-
-		go lms.tradeWorker()
-		go lms.quotesWorker()
-
-		return nil
+	if lms.OnError != nil {
+		lms.OnError(err)
 	}
+
+	lms.connection.Close()
 }
 
-func (lms *LemonMarketsStream) Disconnect() {
-	lms.quitWorkers = true
+func (lms *LemonMarketsStream) ListenToUpdates() {
+	for lms.processData {
+		switch lms.connectiontype {
+		case CONNECTIONTYPE_PRICE:
+			update := PriceUpdate{}
+			if parseError := lms.connection.ReadJSON(update); parseError != nil {
+				lms.handleError(parseError)
+			} else if lms.OnPriceUpdate != nil {
+				lms.OnPriceUpdate(update)
+			}
 
-	close(lms.marketpricepipe)
-
-	for len(lms.marketpricepipe) > 0 {
-		<-lms.marketpricepipe
+		case CONNECTIONTYPE_QUOTE:
+			update := QuoteUpdate{}
+			if parseError := lms.connection.ReadJSON(update); parseError != nil {
+				lms.handleError(parseError)
+			} else if lms.OnQuoteUpdate != nil {
+				lms.OnQuoteUpdate(update)
+			}
+		}
 	}
-
-	close(lms.quotepipe)
-
-	for len(lms.quotepipe) > 0 {
-		<-lms.quotepipe
-	}
-
-	close(lms.errorpipe)
-
-	for len(lms.errorpipe) > 0 {
-		<-lms.errorpipe
-	}
-}
-
-func (lms *LemonMarketsStream) GeneratePriceUpdate(isin string, marketPrice, quantity float64) {
-	lms.marketpricepipe <- LemonMarketsPriceUpdate{ISIN: isin, Price: marketPrice, Quantity: quantity}
-}
-
-func (lms *LemonMarketsStream) GenerateQuoteUpdate(isin string, bid, ask, bidsize, asksize float64) {
-	lms.quotepipe <- LemonMarketsQuoteUpdate{ISIN: isin, Bid: bid, Ask: ask, Bidsize: bidsize, Asksize: asksize}
 }

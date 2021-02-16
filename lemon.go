@@ -2,7 +2,6 @@ package lemon
 
 import (
 	"errors"
-	// "fmt"
 	"github.com/gorilla/websocket"
 )
 
@@ -39,8 +38,8 @@ type QuoteUpdate struct {
 	ISIN    string  `json:"isin"`
 	Bid     float64 `json:"bid_price"`
 	Ask     float64 `json:"ask_price"`
-	Bidsize float64 `json:"bid_size"`
-	Asksize float64 `json:"ask_size"`
+	Bidsize float64 `json:"bid_quan"`
+	Asksize float64 `json:"ask_quan"`
 }
 
 func (lmpr PriceUpdate) WasTrade() bool {
@@ -135,7 +134,7 @@ func (lms *LemonMarketsStream) ListenToUpdates() {
 		switch lms.connectiontype {
 		case CONNECTIONTYPE_PRICE:
 			update := PriceUpdate{}
-			if parseError := lms.connection.ReadJSON(update); parseError != nil {
+			if parseError := lms.connection.ReadJSON(&update); parseError != nil {
 				lms.handleError(parseError)
 			} else if lms.OnPriceUpdate != nil {
 				lms.OnPriceUpdate(update)
@@ -143,7 +142,7 @@ func (lms *LemonMarketsStream) ListenToUpdates() {
 
 		case CONNECTIONTYPE_QUOTE:
 			update := QuoteUpdate{}
-			if parseError := lms.connection.ReadJSON(update); parseError != nil {
+			if parseError := lms.connection.ReadJSON(&update); parseError != nil {
 				lms.handleError(parseError)
 			} else if lms.OnQuoteUpdate != nil {
 				lms.OnQuoteUpdate(update)

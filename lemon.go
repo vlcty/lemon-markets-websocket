@@ -90,8 +90,8 @@ type Quote struct {
 	ISIN    string  `json:"isin"`      // ISIN of the instrument
 	Bid     float64 `json:"bid_price"` // Current bid price
 	Ask     float64 `json:"ask_price"` // Current ask price
-	Bidsize uint    `json:"bid_quan"`  // Current bid size
-	Asksize uint    `json:"ask_quan"`  // Current ask size
+	Bidsize uint64  `json:"bid_quan"`  // Current bid size
+	Asksize uint64  `json:"ask_quan"`  // Current ask size
 }
 
 type stream struct {

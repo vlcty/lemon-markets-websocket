@@ -14,8 +14,8 @@ go get -u github.com/vlcty/lemon-markets-websocket
 
 Lemon markets provides two streams:
 
-- Price updates (ticks) represented by `lemon.TickUpdate`
-- Quotes (Bid, Ask, Sizes, etc) represented by `lemon.QuoteUpdate`
+- Price updates (ticks) represented by `lemon.Tick`
+- Quotes (Bid, Ask, Sizes, etc) represented by `lemon.Quote`
 
 The lib itself uses channels to communicate with your application. You are responsible for the channels to be created, sized and closed after usage. Message parsing may hang if the library needs to wait for your consumer.
 

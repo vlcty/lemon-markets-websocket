@@ -62,7 +62,7 @@ var (
 	// ErrConnectionClosed is returned when an active WebSocket connection closed. All further processing is stopped.
 	ErrConnectionClosed error = errors.New("Lemon markets connection closed")
 
-	// ErrUnknownISIN is returned when a subscription for an invalid or unknown ISIN occured. This error does not stop message processing
+	// ErrUnknownISIN is returned when a subscription for an invalid or unknown ISIN occurred. This error does not stop message processing
 	ErrUnknownISIN error = errors.New("Invalid ISIN")
 
 	// ErrInvalidRequest is returned when an invalud request was detected
@@ -73,8 +73,8 @@ var (
 )
 
 const (
-	// Stream is initalizing
-	State_init string = "initalizing"
+	// Stream is initializing
+	State_init string = "initializing"
 
 	// Stream is connecting
 	State_connecting string = "connecting"
@@ -127,7 +127,7 @@ type stream struct {
 	rawMessages       chan<- []byte // Channel where raw messages from the WebSocket are sent into if not nil. Under user control!
 }
 
-// init initalized shared variables and channels and start the reconnect watchdog
+// init initialized shared variables and channels and start the reconnect watchdog
 func (stream *stream) init() {
 	stream.state = State_init
 	stream.subscriptions = make(map[string]uint)
@@ -161,7 +161,7 @@ type QuoteStream struct {
 	updateChannel chan<- *Quote
 }
 
-// NewTickStream will initalize a new connection to stream ticks. Keep in mind: You are responsible for the passed
+// NewTickStream will initialize a new connection to stream ticks. Keep in mind: You are responsible for the passed
 // channels.
 func NewTickStream(updateChan chan<- *Tick, errChan chan<- error) *TickStream {
 	stream := &TickStream{}
@@ -195,7 +195,7 @@ func NewTickStream(updateChan chan<- *Tick, errChan chan<- error) *TickStream {
 	return stream
 }
 
-// NewQuoteStream will initalize a new connection to stream quotes. Keep in mind: You are responsible for the passed
+// NewQuoteStream will initialize a new connection to stream quotes. Keep in mind: You are responsible for the passed
 // channels.
 func NewQuoteStream(updateChan chan<- *Quote, errChan chan<- error) *QuoteStream {
 	stream := &QuoteStream{}

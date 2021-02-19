@@ -10,16 +10,25 @@ Install using go get:
 go get -u github.com/vlcty/lemon-markets-websocket
 ```
 
-## Usage
+## Capabilities
 
-Lemon markets provides two streams:
+Lemon.markets provides two streams:
 
-- Price updates (ticks) represented by `lemon.Tick`
-- Quotes (Bid, Ask, Sizes, etc) represented by `lemon.Quote`
+Ticks:   
+Ticks are price updates containing the current market price for a security. It's sent when a tade occured. The quantity value tells you the amount of traded shares. If quantity is 0 then no actual trade happened, but the market maker Lang und Schwarz set a new price.
 
-The lib itself uses channels to communicate with your application. You are responsible for the channels to be created, sized and closed after usage. Message parsing may hang if the library needs to wait for your consumer.
+Quotes:   
+Quotes contain the current bid and ask spread and its sizes.
 
-Example code:
+## Connection handling
+
+The library keeps track of the connection in the background. Automatic reconnects are done when the connection drops.
+
+## Use of channels
+
+This library uses channels to communicate with your application. You are responsible for these channels! Depending on the amount of subscribed securities you may want to use buffered or unbuffered channels. Make sure that you close and empty them after you disconnect from the stream.
+
+## Example code
 
 ```go
 package main
@@ -38,18 +47,10 @@ func main() {
 	errChan := make(chan error, 0)
 
 	// Create a stream struct for tick updates and pass in the needed channels
-	tickStream, tickErr := lemon.NewTickStream(tickChan, errChan)
-
-	if tickErr != nil {
-		panic(tickErr)
-	}
+	tickStream := lemon.NewTickStream(tickChan, errChan)
 
 	// Create a stream struct for quote updates and pass in the needed channels
-	quoteStream, quoteErr := lemon.NewQuoteStream(quoteChan, errChan)
-
-	if quoteErr != nil {
-		panic(quoteErr)
-	}
+	quoteStream := lemon.NewQuoteStream(quoteChan, errChan)
 
 	// Define some ISINs
 	isins := []string{
@@ -66,7 +67,7 @@ func main() {
 		quoteStream.Subscribe(isin)
 	}
 
-	// Create a regular exit condition
+	// Create an exit condition
 	timeToStop := time.After(time.Minute)
 
 	// Create a loop to process updates
@@ -75,17 +76,7 @@ func main() {
 	for processUpdates {
 		select {
 		case err := <-errChan:
-			processUpdates = false
-
-			// An error occured. Identify which one
-			if err == lemon.ErrConnectionClosed {
-				fmt.Println("Connection closed by remote peer")
-			} else if err == lemon.ErrUnknownISIN {
-				fmt.Println("Unknown or invalid ISIN in subscription")
-				processUpdates = true // Override exit decision. It's not a critical one
-			} else {
-				fmt.Println("Unknown Error: ", err.Error())
-			}
+            fmt.Printf("An error occured: %s\n", err.Error())
 
 		case tick := <-tickChan:
 			// A tick update was received: Print all available fields
@@ -100,12 +91,10 @@ func main() {
 			// Time to stop. Disconnect on our behalf
 			fmt.Println("It's time to stop")
 			processUpdates = false
-			tickStream.Disconnect()
-			quoteStream.Disconnect()
 		}
 	}
 
-	// Disconnect from the streams (not a must and does not hurt even if already closed)
+	// Disconnect from the streams
 	tickStream.Disconnect()
 	quoteStream.Disconnect()
 
@@ -125,7 +114,5 @@ func main() {
 	for len(errChan) > 0 {
 		<-errChan
 	}
-
-	// Done
 }
 ```

@@ -261,7 +261,7 @@ func (lms *stream) GetState() string {
 func (lms *stream) GetSubscriptions() []string {
 	subs := make([]string, 0)
 
-	for isin, _ := range lms.subscriptions {
+	for isin := range lms.subscriptions {
 		subs = append(subs, isin)
 	}
 
@@ -295,7 +295,7 @@ func (lms *stream) connect() {
 
 		go lms.listen()
 
-		for isin, _ := range lms.subscriptions {
+		for isin := range lms.subscriptions {
 			lms.sendSubscription(lms.getSubscription(isin))
 		}
 	}
@@ -367,8 +367,8 @@ func isExchangeOpen(now time.Time) bool {
 	location, _ := time.LoadLocation("Europe/Berlin")
 
 	openingHours := map[time.Weekday][4]int{
-		time.Saturday: [4]int{10, 0, 13, 0}, // 10:00 - 13:00
-		time.Sunday:   [4]int{17, 0, 19, 0}, // 17:00 - 19:00
+		time.Saturday: {10, 0, 13, 0}, // 10:00 - 13:00
+		time.Sunday:   {17, 0, 19, 0}, // 17:00 - 19:00
 	}
 
 	var opening, closing time.Time

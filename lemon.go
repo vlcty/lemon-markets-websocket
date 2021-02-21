@@ -50,6 +50,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -113,24 +114,26 @@ type Quote struct {
 
 // stream contains values, functions and channels shared by TickStream and QuoteStream
 type stream struct {
-	connection        *websocket.Conn
-	processData       bool                                  // Read messages from the WebSocket
-	subscriptions     map[string]uint                       // All subscriptions the user did
-	getUpdateType     func() interface{}                    // Function returning the needed update type (tick or quote)
-	sendUpdate        func(interface{})                     // Function to send the update into the channel
-	getWebsocketUrl   func() string                         // Returns the websocket URL
-	getSubscription   func(string) *lemonMarketSubscription // Creates a subscription type with the needed values
-	reconnectNotifier chan uint                             // Channel to notify reconnectWatchdog to do a reconnect. Channel is under our control!
-	failedReconnects  int
-	state             string        // Current state
-	errorChannel      chan<- error  // Channel where errors are sent into. Under user control!
-	rawMessages       chan<- []byte // Channel where raw messages from the WebSocket are sent into if not nil. Under user control!
+	connection         *websocket.Conn
+	processData        bool                                  // Read messages from the WebSocket
+	subscriptions      map[string]uint                       // All subscriptions the user did
+	subscriptionsMutex *sync.Mutex                           // Mutex for map access
+	getUpdateType      func() interface{}                    // Function returning the needed update type (tick or quote)
+	sendUpdate         func(interface{})                     // Function to send the update into the channel
+	getWebsocketUrl    func() string                         // Returns the websocket URL
+	getSubscription    func(string) *lemonMarketSubscription // Creates a subscription type with the needed values
+	reconnectNotifier  chan uint                             // Channel to notify reconnectWatchdog to do a reconnect. Channel is under our control!
+	failedReconnects   int
+	state              string        // Current state
+	errorChannel       chan<- error  // Channel where errors are sent into. Under user control!
+	rawMessages        chan<- []byte // Channel where raw messages from the WebSocket are sent into if not nil. Under user control!
 }
 
 // init initialized shared variables and channels and start the reconnect watchdog
 func (stream *stream) init() {
 	stream.state = State_init
 	stream.subscriptions = make(map[string]uint)
+	stream.subscriptionsMutex = &sync.Mutex{}
 	stream.reconnectNotifier = make(chan uint, 1)
 	stream.failedReconnects = 0
 
@@ -235,6 +238,9 @@ func (lms *stream) sendSubscription(subscription *lemonMarketSubscription) {
 
 // Subscribe to an instrument by supplying an ISIN. Double subscriptions are prevented silently.
 func (lms *stream) Subscribe(isin string) {
+	lms.subscriptionsMutex.Lock()
+	defer lms.subscriptionsMutex.Unlock()
+
 	if _, exists := lms.subscriptions[isin]; !exists {
 		lms.subscriptions[isin] = 1
 		lms.sendSubscription(lms.getSubscription(isin))
@@ -243,6 +249,9 @@ func (lms *stream) Subscribe(isin string) {
 
 // Unsubscribe to an instrument by supplying an ISIN. Double unsubscriptions are prevented silently.
 func (lms *stream) Unsubscribe(isin string) {
+	lms.subscriptionsMutex.Lock()
+	defer lms.subscriptionsMutex.Unlock()
+
 	if _, exists := lms.subscriptions[isin]; exists {
 		delete(lms.subscriptions, isin)
 
@@ -259,6 +268,9 @@ func (lms *stream) GetState() string {
 
 // GetSubscriptions returns all stored subscriptions
 func (lms *stream) GetSubscriptions() []string {
+	lms.subscriptionsMutex.Lock()
+	defer lms.subscriptionsMutex.Unlock()
+
 	subs := make([]string, 0)
 
 	for isin := range lms.subscriptions {
@@ -295,9 +307,11 @@ func (lms *stream) connect() {
 
 		go lms.listen()
 
+		lms.subscriptionsMutex.Lock()
 		for isin := range lms.subscriptions {
 			lms.sendSubscription(lms.getSubscription(isin))
 		}
+		lms.subscriptionsMutex.Unlock()
 	}
 }
 

@@ -1,3 +1,7 @@
+# DEPRECATED - DO NOT USE
+
+lemon.markets reached out to me telling me their streaming API ist shut down and deprecated. Do not use!
+
 # lemon-markets-websocket
 
 A go wrapper lib for the [lemon.markets](https://lemon.markets) WebSocket streams.
